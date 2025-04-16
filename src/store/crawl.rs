@@ -1,0 +1,45 @@
+use std::borrow::Borrow;
+
+use url::Url;
+
+use crate::{utils::{database::Database, wrappers::DateTime}, Result};
+
+#[derive(Debug, Clone)]
+pub struct Crawl {
+    pub id: i64,
+    pub name: Option<String>,
+    pub root_url: Url,
+    pub depth: usize,
+    pub started_at: DateTime,
+    pub finished_at: DateTime,
+}
+impl Crawl {
+    pub async fn new(
+        database: impl Borrow<Database>,
+        name: Option<impl AsRef<str>>,
+        root_url: impl Borrow<Url>,
+        depth: usize,
+        started_at: impl Borrow<DateTime>,
+        finished_at: impl Borrow<DateTime>,
+    ) -> Result<Self> {
+        let database: &Database = database.borrow();
+        
+        let name = name.and_then(|x| Some(x.as_ref().to_string()));
+        let root_url: &Url = root_url.borrow();
+        let string_root_url = root_url.to_string();
+        let started_at: DateTime = started_at.borrow().clone();
+        let finished_at: DateTime = finished_at.borrow().clone();
+        
+        let id = database.insert_crawl(name.as_ref(), &string_root_url, depth, &started_at, &finished_at).await?;
+        
+
+        Ok(Crawl {
+            id,
+            name,
+            root_url: root_url.clone(),
+            depth,
+            started_at,
+            finished_at,
+        })
+    }
+}

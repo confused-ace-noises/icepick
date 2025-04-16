@@ -1,0 +1,43 @@
+use std::sync::Arc;
+use std::borrow::Borrow;
+
+use url::Url;
+
+use super::crawl::Crawl;
+use crate::utils::database::Database;
+use crate::Result;
+
+// all the tree from the father down has the exact same lifetime
+
+#[derive(Clone, Debug)]
+pub struct Page {
+    pub id: i64,
+    pub url: Url,
+    pub depth: usize,
+    pub response_code: u16,
+    pub time_ms: u32,
+    pub html: Option<String>,
+
+    pub father: Option<Arc<Page>>,
+    pub crawl: Arc<Crawl>,
+}
+
+impl Page {
+    pub async fn new(database: impl Borrow<Database>, crawl: impl Borrow<Crawl>, father: Option<impl Borrow<Page>>, url: impl Borrow<Url>, html: Option<impl AsRef<str>>, depth: usize, response_code: u16, time_ms: u32) -> Result<Self> {
+        let database: &Database = database.borrow();
+        let url: &Url = url.borrow();
+        let crawl_id = database.insert_page(crawl.borrow(), &url, &html, &father, depth, response_code, time_ms).await?;
+        let html = html.and_then(|x| Some(x.as_ref().to_string()));
+
+        Ok(Self {
+            id: crawl_id,
+            url: url.clone(),
+            depth,
+            response_code,
+            time_ms,
+            html,
+            father: father.and_then(|inner| Some(Arc::new(inner.borrow().clone()))),
+            crawl: Arc::new(crawl.borrow().clone())
+        })
+    }
+}
