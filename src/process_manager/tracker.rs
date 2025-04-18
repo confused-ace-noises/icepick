@@ -57,16 +57,10 @@ where
 
     pub fn new<F, Fut>(process_fn: F) -> Self 
     where 
-        F: Fn(Tracked<I>) -> Fut + Send + 'static,
-        Fut: Future<Output = Tracked<O>> + Send + 'static,
+        F: Fn(I) -> Fut + Send + 'static,
+        Fut: Future<Output = O> + Send + 'static,
     {
-        let manager = Manager::new(process_fn);
-        let results_available = Arc::new(Mutex::new(HashMap::<Uuid, O>::new()));
-
-        Self {
-            manager,
-            results_available
-        }
+        Self::new_with_buffer(Manager::<Tracked<I>, Tracked<O>>::STANDARD_BUFFER, process_fn)
     }
 
     pub async fn push(&mut self, to_push: I) -> Uuid {
@@ -103,6 +97,20 @@ where
         map.extend(entries);
     }
 
+    pub async fn poll_until(&mut self, found: Uuid) -> O {
+        let result: O;
+        
+        'poll_loop: loop {
+            self.poll(1).await;
+            if let Some(tracked) = self.take(found).await {
+                result = tracked;
+                break 'poll_loop;
+            }
+        }
+
+        result
+    }
+
     pub async fn poll_available(&mut self) {
         let output = self.manager.poll_available().await;
     
@@ -135,7 +143,19 @@ where
             .map(|id| map.remove(&id))
             .collect()
     }
+
+    pub async fn exec(&mut self, input: I) -> Uuid {
+        let tracked = Tracked::new(input);
+        let id = tracked.id;
+        self.manager.exec(tracked).await;
+
+        id
+    }
     
+    pub async fn submit(&mut self, input: I) -> O {
+        let id = self.exec(input).await;
+        self.poll_until(id).await
+    }
 
     async fn wait_until_interval<'a, B, Fut>(&'a self, polling_interval: u64, func: B)
     where 

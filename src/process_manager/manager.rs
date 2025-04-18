@@ -157,6 +157,14 @@ where
         pool_lock.push_back(to_push);
     }
 
+    pub async fn exec(&mut self, to_push: I) {
+        let pool_clone = Arc::clone(&self.to_process_pool);
+        let mut pool_lock = pool_clone.lock().await;
+
+        pool_lock.push_front(to_push);
+        self.resume(1).await; // resume that one item
+    }
+
     pub async fn push_many(&mut self, to_push: impl Iterator<Item = I>) {
         let pool_clone = Arc::clone(&self.to_process_pool);
         let mut pool_lock = pool_clone.lock().await;

@@ -22,14 +22,15 @@ impl Scraper {
         }
     }
 
-    pub async fn get(&mut self) -> Result<()> {
+    pub async fn get(&mut self) -> Result<u16> {
         let response = self.client.get(self.url.as_str()).send().await?;
 
         if response.status().is_success() {
+            let response_code = response.status().as_u16();
             let text = response.text().await?;
 
             self.html = Some(text);
-            return Ok(());
+            return Ok(response_code);
         } else {
             return Err(Error::GenericError(
                 "Internet error: request unsuccessful".to_string(),
@@ -40,7 +41,7 @@ impl Scraper {
     /// ## Usage
     /// gets all links out of a previously gotten html string.
     /// if self.html is none, it'll return None itself.
-    pub async fn scrape(self) -> Option<ScrapeOut> {
+    pub async fn scrape(self, response_code: u16) -> Option<ScrapeOut> {
         match self.html {
             None => return None,
             Some(html) => {
@@ -52,16 +53,16 @@ impl Scraper {
                     .filter_map(|url| Url::from_str(&url).ok())
                     .collect();
 
-                let scrape_out = ScrapeOut { html, links };
+                let scrape_out = ScrapeOut { html, links, response_code, url: self.url };
                 Some(scrape_out)
             }
         }
     }
 
     pub async fn get_and_scrape(mut self) -> Result<ScrapeOut> {
-        self.get().await?;
+        let response_code = self.get().await?;
         let scrape_out = self
-            .scrape() // Always Ok
+            .scrape(response_code) // Always Ok
             .await
             .unwrap();
 
@@ -69,8 +70,10 @@ impl Scraper {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScrapeOut {
+    pub(super) url: Url,
     pub(super) html: String,
-    pub(super) links: Vec<Url>
+    pub(super) links: Vec<Url>,
+    pub(super) response_code: u16,
 }
