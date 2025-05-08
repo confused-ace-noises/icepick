@@ -35,13 +35,10 @@ enum Status {
     }
 }
 
-// made this! :D
 pub struct Manager<I, O>
 where
     I: Send + 'static,
     O: Send + 'static,
-    // F: Fn(I) -> Fut + Send + Sync + 'static,
-    // Fut: Future<Output = O> + Send + 'static,
 {
     // event_pool: Arc<Mutex<VecDeque<Task>>>,
     task_sender: Sender<Task>,
@@ -72,6 +69,7 @@ where
 
         let status = Arc::new(Mutex::new(Status::Idle));
         let status_out = Arc::clone(&status);
+
         tokio::spawn(async move {
             let status_clone = Arc::clone(&status);
             loop {
@@ -124,6 +122,7 @@ where
                             if sent.iter().any(|results| results.is_err()) {
                                 panic!("Internal fatal error; resume internal execution: receiver of batch of results must still be alive at time of sending");
                             }
+                            break;
                         }
 
                         Task::ForceKill => {
@@ -132,7 +131,7 @@ where
                     }
                 } else {
                     let mut status_lock = status_clone.lock().await;
-                    *status_lock = Status::Processing;
+                    *status_lock = Status::Idle;
 
                     drop(status_lock);
                 }
@@ -245,7 +244,7 @@ where
         self.task_sender.send(Task::PoliteKill).await.expect("Internal fatal error; kill: receiver of kill task must still be alive at time of sending");
 
         let output = self.poll_drain().await;
-        self.kill_forced().await;
+        self.kill_forced().await; // FIXME
         output
     }
 

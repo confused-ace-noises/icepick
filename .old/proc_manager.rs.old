@@ -1,0 +1,92 @@
+use std::{marker::PhantomData, ops::Index};
+
+use dashmap::DashSet;
+use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::sync::mpsc::{self, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio_stream::wrappers::ReceiverStream;
+
+pub enum Instruction {
+    Batch,
+
+    Race,
+    PoliteKill,
+    ForceKill,
+}
+
+pub struct ProcManager<I, O>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+{
+    info_sender: Sender<I>,
+    recv_subs: UnboundedReceiver<ReceiverStream<I>>,
+
+    use_out: PhantomData<O>
+}
+
+impl<I, O> ProcManager<I, O>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+{
+    pub async fn new<Proc, FutO>(proc: Proc) -> Self
+    where
+        Proc: FnMut(I) -> FutO + Send + 'static,
+        FutO: Future<Output = O>,
+    {
+        let (handle_register_tx, mut handle_register_rx) = mpsc::unbounded_channel::<ReceiverStream<I>>();
+        let mut stream_pool = FuturesUnordered::new();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(new_stream) = handle_register_rx.recv() => {
+                        stream_pool.push(new_stream.next());
+                    }
+                    Some(instruction) = stream_pool.next() => {
+                        if let Some(instr) = instruction {
+                            // Forward to main process logic
+                            info_sender.send(instr).await.unwrap();
+                        }
+                    }
+                    else => break, // both exhausted
+                }
+            }
+        });
+
+        todo!()
+    }
+
+    pub async fn subscribe(&self) -> ProcessSubscription<I, O> {
+        todo!();
+    }
+}
+
+pub struct ProcessSubscription<I, O>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+{
+    sender: Sender<I>,
+    recv: Receiver<O>,
+}
+
+impl<I, O> ProcessSubscription<I, O>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+{
+}
+
+pub struct Batch<I> 
+where 
+    I: Send + 'static
+{
+    batch_type: BatchType,
+    batch: Vec<I>, 
+}
+
+
+pub enum BatchType {
+
+}

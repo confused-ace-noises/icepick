@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use super::manager::Manager;
+use crate::process_manager::old_manager::Manager;
 use futures::future::join_all;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -25,7 +25,7 @@ where
     O: Send + 'static,
 {
     manager: Manager<Tracked<I>, Tracked<O>>,
-    results_available: Arc<Mutex<HashMap<Uuid, O>>>
+    results_available: Arc<Mutex<HashMap<Uuid, O>>> // TODO: maybe use dashmap here?
 }
 
 impl<I, O> Tracker<I, O> 

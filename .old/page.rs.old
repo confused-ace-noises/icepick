@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 
 use url::Url;
 

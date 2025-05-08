@@ -1,0 +1,213 @@
+use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
+use std::path::{self, Path};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64};
+
+use futures::future::OptionFuture;
+use reqwest::Response;
+use tokio::sync::{Notify, RwLock};
+use tokio_rusqlite::{Connection, Error, Params, ToSql, params, params_from_iter};
+
+use crate::Result;
+use crate::process_manager::{self, manager::ProcessManager};
+
+static mut COUNTER: AtomicU32 = AtomicU32::new(0);
+
+macro_rules! convert_args {
+    ($vec:expr) => {
+        &(&$vec)
+            .iter()
+            .map(|b| b.as_ref() as &dyn ToSql)
+            .collect::<Vec<&dyn ToSql>>()[..]
+    };
+}
+
+#[macro_export]
+macro_rules! params {
+    ($($param:expr),*) => {
+        {
+            let mut tmp_vec: Vec<Box<dyn ToSql + Send>> = Vec::new();
+            $(
+                tmp_vec.push(Box::new($param));
+            )*
+            tmp_vec
+        }
+    };
+}
+
+pub type SendableSql = Box<dyn ToSql + Send>;
+
+#[derive(Debug)]
+pub struct ResolvePromise(Arc<Notify>, u32);
+
+impl ResolvePromise {
+    pub fn new(notify: Notify) -> Self {
+        let atomic_count = unsafe { COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+
+        Self(Arc::new(notify), atomic_count)
+    }
+
+    pub fn send_notif(self) {
+        self.0.notify_waiters();
+    }
+
+    async fn wait_notif(&self) {
+        self.0.notified().await
+    }
+
+    pub async fn resolve(self, vec: Arc<RwLock<Vec<ResolvePromise>>>) {
+        self.wait_notif().await;
+        let mut lock = vec.write().await;
+
+        let index = lock.binary_search(&self);
+        match index {
+            Err(_) => {
+                drop(lock);
+                return
+            },
+
+            Ok(y) => {
+                lock.remove(y);
+                drop(lock);
+            }
+        }
+    }
+}
+
+impl PartialEq for ResolvePromise {
+    fn eq(&self, other: &Self) -> bool {
+        self.1 == other.1
+    }
+}
+
+impl PartialOrd for ResolvePromise {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.1.partial_cmp(&other.1)
+    }
+}
+
+impl Eq for ResolvePromise {}
+
+impl Ord for ResolvePromise {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.1.cmp(&other.1)
+    }
+}
+
+impl Clone for ResolvePromise {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0), self.1)
+    }
+}
+
+unsafe impl Send for ResolvePromise {}
+
+pub struct Database {
+    ongoing: Arc<RwLock<Vec<ResolvePromise>>>,
+    connection: Connection,
+}
+impl Database {
+    pub const DATABASE_PATH: &str = "icepick_crawl_data.db";
+
+    async fn new(db_path: Option<impl AsRef<Path>>) -> Result<Self> {
+        Ok(Self {
+            ongoing: Arc::new(RwLock::new(vec![])),
+            connection: {
+                match db_path {
+                    Some(path) => Connection::open(path).await?, 
+                    None => Connection::open(Self::DATABASE_PATH).await?,                    
+                }
+            },
+        })
+    }
+
+    pub async fn execute(
+        &mut self,
+        sql: impl AsRef<str> + Send + Sync + 'static,
+        params: Vec<Box<dyn ToSql + Send>>,
+    ) -> Result<usize> {
+        let ongoing_clone = self.ongoing.clone();
+
+        let resolve_promise = ResolvePromise::new(Notify::new());
+        let resolve_promise_clone = resolve_promise.clone();
+        let resolve_promise_clone2 = resolve_promise.clone();
+        
+        let x = self
+            .connection
+            .call(move |connection| {
+                let params = convert_args!(params);
+                let sql = sql.as_ref();
+                tokio::task::spawn_blocking(async move || {
+                    let mut lock = ongoing_clone.write().await;
+                    lock.push(resolve_promise_clone.clone());
+                    drop(lock);
+                });
+
+                let res = connection.execute(sql, params);
+                resolve_promise_clone2.send_notif();
+                Ok(res)
+            })
+            .await?
+            .map_err(|e| Error::Rusqlite(e))?;
+        resolve_promise.resolve(Arc::clone(&self.ongoing)).await;
+        Ok(x)
+    }
+
+    pub fn init() -> Result<Self> {
+        let path = Self::DATABASE_PATH;
+
+        let mut make_db = false;
+
+        // Check if the database exists
+        if let Err(e) = File::open(&path) {
+            match e.kind() {
+                ErrorKind::NotFound => {
+                    OpenOptions::new().write(true).read(true).create_new(true).open(&path)?;
+                    make_db = true;
+                },
+                _ => return Err(e).map_err(crate::Error::from),
+            }
+        }
+
+        if make_db {
+            // Self::make_db(&path_name)?;
+        }
+        
+        todo!()
+    }
+
+}
+
+// impl From<&[&dyn ToSql]> for &[&dyn SendableSql] {
+//     fn from(value: &[&dyn ToSql]) -> Self {
+//         todo!()
+//     }
+// }
+
+async fn test() {
+    // let database = Database {
+    //     process_manager: ProcessManager::new_simple(|x: (String, Vec<Box<dyn ToSql + Send>>)| {
+    //         let client = reqwest::Client::new();
+    //         client.get("askiiart.net").send()
+    //     }).await
+    // };
+
+    let x: Vec<Box<dyn ToSql + Send>> =
+        params!["hello world,", 123, String::from("idk, something")];
+    // database.process_manager.push((String::from("idk"), x)).await;
+    // let conn = rusqlite::Connection::open_in_memory().unwrap();
+    // conn.execute("thing", x).unwrap();
+
+    let mut database = Database::new(None::<&str>).await.unwrap();
+
+    let params = params![1, 2, "&str", String::from("String"), 5_f64];
+
+    database.execute("hello", x);
+}
+
+fn convert_args(args: &Vec<Box<dyn ToSql + Send>>) -> Vec<&dyn ToSql> {
+    args.iter().map(|b| b.as_ref() as &dyn ToSql).collect()
+}
+

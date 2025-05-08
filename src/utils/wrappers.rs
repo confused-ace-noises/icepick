@@ -1,7 +1,8 @@
 use std::{ops::{Deref, DerefMut}, str::FromStr};
 use chrono::{DateTime as ChronoDatetime, Local};
+use tokio_rusqlite::ToSql;
 use url::Url;
-use crate::Result;
+use anyhow::Result;
 
 #[derive(Clone, Debug)]
 pub struct W<T>(T);
@@ -43,5 +44,17 @@ impl ToUrlStr for str {
     fn to_url(&self) -> Result<Url> {
         let tmp = Url::from_str(self)?;
         Ok(tmp)
+    }
+}
+
+pub trait ToStorable {
+    type Output: ToSql;
+    fn to_storable(self) -> Self::Output;
+}
+
+impl ToStorable for ChronoDatetime<Local> {
+    type Output = String;
+    fn to_storable(self) -> Self::Output {
+        self.format("%Y-%m-%d %H:%M:%S").to_string()
     }
 }

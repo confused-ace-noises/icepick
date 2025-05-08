@@ -5,14 +5,25 @@ edition = "2024"
 
 [dependencies]
 thiserror = "2.0.12"
+anyhow = "1.0.98"
 reqwest = "0.12.15"
-tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.45.0", features = ["macros", "rt-multi-thread"] }
 futures = "0.3.31"
-rusqlite = "0.34.0"
 chrono = "0.4.40"
-r2d2 = "0.8.10"
-r2d2_sqlite = "0.27.0"
+# rusqlite = "0.35.0"
+# r2d2 = "0.8.10"
+# r2d2_sqlite = "0.28.0"
 url = "2.5.4"
 scraper = "0.23.1"
 zstd = "0.13.3"
-uuid = { version = "1.16.0", features = ["v4"] }
+uuid = { version = "1.16.0", features = ["v7"] }
+tokio-rusqlite = "0.6.0"
+# governor = "0.10.0"
+dashmap = "6.1.0"
+trust-dns-resolver = "*"
+tokio-stream = "0.1.17"
+async-trait = "0.1.88"
+
+[profile.test]
+opt-level = 3
+codegen-units = 1

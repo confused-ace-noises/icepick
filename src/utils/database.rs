@@ -1,7 +1,7 @@
-use std::{borrow::Borrow, fs::{File, OpenOptions}, io::ErrorKind, path::Path};
+use std::{borrow::{Borrow, Cow}, fs::{File, OpenOptions}, io::ErrorKind, path::Path};
 use r2d2::{Pool, PooledConnection};
 use rusqlite::{params, Connection};
-use crate::{store::{crawl::Crawl, page::Page}, Result};
+use crate::{database::{crawl::Crawl, page::Page}, Result};
 use super::{compress::Compress, wrappers::DateTime};
 use r2d2_sqlite::SqliteConnectionManager;
 
@@ -86,7 +86,7 @@ impl Database {
             let trans = conn.transaction()?;
 
             let parameters = params![name, root_url, depth, started_at, finished_at];
-
+            
             trans.execute(
                 "INSERT INTO crawls (name, root_url, depth, started_at, finished_at) VALUES (?1, ?2, ?3, ?4, ?5);",
                 parameters,
@@ -115,6 +115,47 @@ impl Database {
         let crawl_id = {let crawl_borrow: &Crawl = crawl.borrow(); crawl_borrow.id};
         // compressed
         let html = html.as_ref().and_then(|inner| Some(inner.as_ref().to_string().compress().ok())).flatten();
+
+        let pool = self.pool.clone(); 
+    
+        tokio::task::spawn_blocking(move || {
+            let mut conn = pool.get()?;
+            let trans = conn.transaction()?;
+    
+            let parameters = params![url, html, father_id, depth, response_code, time_ms, crawl_id];
+            // ? new table "pages", (id, url, html(nullable), father_id(nullable) -> pages(id), depth, response_code, time_ms, crawl_id -> crawls(id))
+
+            trans.execute(
+                "INSERT INTO pages (url, father_id, html, depth, response_code, time_ms, crawl_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+                parameters,
+            )?;
+    
+            let id = trans.last_insert_rowid();
+            trans.commit()?;
+    
+            Ok(id)
+        })
+        .await?
+    }
+
+    pub async fn insert_page_cow<'a>(
+        &self, 
+        crawl: impl Borrow<Crawl>, 
+        url: Cow<'a, str>,
+        html: &Option<Cow<'a, str>>, 
+        father: &Option<impl Borrow<Page>>, 
+        depth: usize, 
+        response_code: u16,
+        time_ms: u32
+    ) -> Result<i64> {
+        let url = url.as_ref().to_string();
+        let father_id = father.as_ref().and_then(|inner| Some(Borrow::<Page>::borrow(inner).id));
+        let crawl_id = {let crawl_borrow: &Crawl = crawl.borrow(); crawl_borrow.id};
+        // compressed
+        let html = match html.as_ref() {
+            Some(x) => Some(x.as_ref().compress().ok()).flatten(),
+            None => None
+        };
 
         let pool = self.pool.clone(); 
     
