@@ -5,30 +5,27 @@ use uuid::Uuid;
 
 use crate::process_manager::task::Task;
 
-use super::proc_manager_handle::ProcManagerHandle;
+use super::proc_manager_handle::{ProcManagerHandle, UserProcess};
 
 pub struct ProcManager<Input, Output, PP, /*Proc, FutOut*/>
 where
     Input: Send + 'static,
     Output: Send + 'static,
-    // Proc: Fn(PP, Input) -> FutOut + Send + 'static + ?Sized,
-    // FutOut: Future<Output = Output> + Send + 'static + ?Sized,
 {
     preprocessed: PP,
-    process: Arc<Box<dyn Fn(PP, Input) -> Pin<Box<dyn Future<Output = Output> + Send + 'static>> + Send + Sync + 'static>>,
+    process: UserProcess<Input, Output, PP>,
     instruction_sender: Arc<mpsc::Sender<Task>>,
-    _phantom: PhantomData<(Input, Output)>,
 }
 
-impl<Input, Output, PP, /*Proc, FutOut*/> ProcManager<Input, Output, PP, /*Proc, FutOut*/>
+impl<Input, Output, PP> ProcManager<Input, Output, PP, /*Proc, FutOut*/>
 where
     Input: Send + 'static,
     Output: Send + 'static,
     // Proc: Fn(PP, Input) -> FutOut + Send + Sync + 'static,
     // FutOut: Future<Output = Output> + Send + 'static,
-    PP: Clone
+    PP: Clone + Send
 {
-    pub async fn new_with_buffer_with_preprocessed_with_wrapper<PreWrap, WrapFunc, Proc>(
+    pub fn new_with_buffer_with_preprocessed_with_wrapper<PreWrap, WrapFunc, Proc>(
         buffer: usize,
         preprocessed: PreWrap,
         wrap_func: WrapFunc,
@@ -37,7 +34,6 @@ where
     where 
         WrapFunc: FnOnce(PreWrap) -> PP,
         Proc: Fn(PP, Input) -> Pin<Box<dyn Future<Output = Output> + Send + 'static>> + Send + Sync + 'static,
-        // FutOut: dyn Future<Output = Output> + Send + 'static,
     {
         let (instruction_tx, mut instruction_rx) = mpsc::channel::<Task>(buffer);
         
@@ -45,16 +41,16 @@ where
 
         tokio::spawn(async move {
             while let Some(instruction) = instruction_rx.recv().await {
-                instruction.run().await
+                instruction.run().await;
             }
         });
 
-        ProcManager { preprocessed: pp, instruction_sender: Arc::new(instruction_tx), process: Arc::new(Box::new(process) as Box<dyn Fn(PP, Input) -> Pin<Box<dyn Future<Output = Output> + Send + 'static>> + Send + Sync + 'static>), _phantom: PhantomData }
+        ProcManager { preprocessed: pp, instruction_sender: Arc::new(instruction_tx), process: Arc::new(Box::new(process) as Box<dyn Fn(PP, Input) -> Pin<Box<dyn Future<Output = Output> + Send + 'static>> + Send + Sync + 'static>) }
     }
 
 
 
-    pub async fn get_handle(&self) -> ProcManagerHandle<Input, Output, PP> {
+    pub fn get_handle(&self) -> ProcManagerHandle<Input, Output, PP> {
         ProcManagerHandle {
             id_handle: Uuid::now_v7(),
             pre_processed: self.preprocessed.clone(),
@@ -69,7 +65,7 @@ mod test {
     use std::{sync::Arc, time::Duration};
 
     use dashmap::DashMap;
-    use futures::future::join_all;
+    use futures::future::{join_all, Join};
 
     use crate::process_manager::{instructions::{join_all_instr::JoinAllInstruction, race_instr::RaceInstruction}, proc_manager_new::ProcManager};
 
@@ -86,7 +82,7 @@ mod test {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 pre.insert(input, len);
             })
-        ).await;
+        );
 
         let arc_proc = Arc::new(proc_manager);
         let proc_manager1 = arc_proc.clone();
@@ -95,10 +91,10 @@ mod test {
 
 
         let user_1 = tokio::spawn(async move {
-            let handle = proc_manager1.get_handle().await;
+            let handle = proc_manager1.get_handle();
 
-            let mut instruction_join: JoinAllInstruction<_, _> = handle.make_instruction();
-            let mut instruction_race: RaceInstruction<_> = handle.make_instruction();
+            let mut instruction_join = JoinAllInstruction::new();
+            let mut instruction_race = RaceInstruction::new();
 
             instruction_join.push_many(vec![
                 String::from("names"),
@@ -127,9 +123,9 @@ mod test {
         });
 
         let user_2 = tokio::spawn(async move {
-            let handle = proc_manager2.get_handle().await;
+            let handle = proc_manager2.get_handle();
 
-            let mut instruction_join: JoinAllInstruction<_, _> = handle.make_instruction();
+            let mut instruction_join = JoinAllInstruction::new();
             
             instruction_join.push_many(vec![
                 String::from("names_3"),
@@ -148,9 +144,9 @@ mod test {
 
 
         let user_3 = tokio::spawn(async move {
-            let handle = proc_manager3.get_handle().await;
+            let handle = proc_manager3.get_handle();
 
-            let mut instruction_race: RaceInstruction<_> = handle.make_instruction();
+            let mut instruction_race = RaceInstruction::new();
             
             instruction_race.push_many(vec![
                 String::from("names_4"),

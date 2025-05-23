@@ -2,6 +2,8 @@ use std::{marker::PhantomData, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::{error::SendError, Sender}, oneshot};
 use futures::Future;
 use uuid::Uuid;
+use zstd::zstd_safe::OutBuffer;
+use super::proc_manager_handle::UserProcess;
 
 /// A task to be processed.
 pub struct Task {
@@ -9,28 +11,19 @@ pub struct Task {
     fut: Pin<Box<dyn Future<Output = ()> + Send>>
 }
 
-pub struct Executor<Instruction, Input, ClosureOutput, TaskOutput>
-where 
-    Instruction: InstructionExecutor<Input, ClosureOutput, TaskOutput>
-{
-    id: Uuid,
-    instruction: Instruction,
-    _phantom: PhantomData<(Input, ClosureOutput, TaskOutput)>
-}
-
 /// Trait defining how to create and execute task types.
-pub trait InstructionExecutor<Input, ClosureOutput, TaskOutput>: Sized + Send + 'static {
-    fn new() -> Self;
-
-    fn execute<Preprocessed>(
+pub trait InstructionExecutor<Input, ClosureOutput, TaskOutput, Preprocessed: Clone + Send + 'static>: Sized + Send + 'static 
+where 
+    Input: Send + 'static,
+    ClosureOutput: Send + 'static,
+    TaskOutput: Send + 'static,
+    Preprocessed: Clone + Send + 'static
+{    
+    fn execute(
         self,
         preprocessed: Preprocessed,
-        process: Arc<Box<dyn Fn(Preprocessed, Input) -> Pin<Box<dyn Future<Output = ClosureOutput> + Send +  'static>> + Send + Sync + 'static>>,
-    ) -> impl Future<Output = TaskOutput> + Send
-    where
-        Preprocessed: Clone + Send + 'static;
-        // F: Fn(Preprocessed, Input) -> Fut + Send + Sync + 'static,
-        // Fut: Future<Output = ClosureOutput> + Send + 'static;
+        process: UserProcess<Input, ClosureOutput, Preprocessed>,
+    ) -> impl Future<Output = TaskOutput> + Send;
 }
 
 // impl<Instr, Input, ClosureOutput, TaskOutput> Task<Instr, Input, ClosureOutput, TaskOutput>
@@ -72,10 +65,10 @@ impl Task {
     pub fn build_task<I, Input, CO, TO, PP, /*F, Fut*/>(
         instruction: I,
         preprocessed: PP,
-        process: Arc<Box<dyn Fn(PP, Input) -> Pin<Box<dyn Future<Output = CO> + Send + 'static>> + Send + Sync + 'static>>,
+        process: UserProcess<Input, CO, PP>,
     ) -> (Self, oneshot::Receiver<TO>)
     where
-        I: InstructionExecutor<Input, CO, TO> + 'static,
+        I: InstructionExecutor<Input, CO, TO, PP> + 'static,
         Input: Send + 'static,
         CO: Send + 'static,
         TO: Send + 'static,
@@ -95,6 +88,6 @@ impl Task {
     }
 
     pub(super) async fn run(self) {
-        self.fut.await
+        self.fut.await;
     } 
 }

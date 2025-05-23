@@ -1,10 +1,13 @@
-use std::{marker::PhantomData, pin::{self, Pin}, sync::Arc};
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+
+use std::marker::PhantomData;
 
 use futures::{future::join_all, FutureExt};
-use tokio::sync::mpsc::Sender;
-use uuid::Uuid;
 
-use super::super::task::{Executor, InstructionExecutor};
+use crate::process_manager::proc_manager_handle::UserProcess;
+
+use super::super::task::InstructionExecutor;
 
 pub struct JoinAllInstruction<Input, ClosureOutput> {
     batch: Vec<Input>,
@@ -12,6 +15,13 @@ pub struct JoinAllInstruction<Input, ClosureOutput> {
 }
 
 impl<Input, ClosureOutput> JoinAllInstruction<Input, ClosureOutput> {
+    pub fn new() -> Self {
+        Self {
+            batch: Vec::new(),
+            _phantom: PhantomData
+        }
+    }
+
     pub fn push(&mut self, item: Input) {
         self.batch.push(item);
     }
@@ -21,27 +31,17 @@ impl<Input, ClosureOutput> JoinAllInstruction<Input, ClosureOutput> {
     }
 }
 
-impl<Input, ProcessOutput> InstructionExecutor<Input, ProcessOutput, Vec<ProcessOutput>> for JoinAllInstruction<Input, ProcessOutput>
+impl<Input, ProcessOutput, PP> InstructionExecutor<Input, ProcessOutput, Vec<ProcessOutput>, PP> for JoinAllInstruction<Input, ProcessOutput>
 where
     Input: Send + 'static,
     ProcessOutput: Send + 'static,
+    PP: Send + Clone + 'static
 {
-    fn new() -> Self {
-        Self {
-            batch: Vec::new(),
-            _phantom: PhantomData,
-        }
-    }
-
-    fn execute<Preprocessed>(
+    fn execute(
         self,
-        preprocessed: Preprocessed,
-        process: Arc<Box<dyn Fn(Preprocessed, Input) -> Pin<Box<dyn Future<Output = ProcessOutput> + Send + 'static>> + Send + Sync + 'static>>,
+        preprocessed: PP,
+        process: UserProcess<Input, ProcessOutput, PP>
     ) -> impl Future<Output = Vec<ProcessOutput>> + Send
-    where
-        Preprocessed: Clone + Send  + 'static,
-        // F: Fn(Preprocessed, Input) -> Fut + Send + Sync + 'static,
-        // Fut: Future<Output = ProcessOutput> + Send + 'static,
     {
         let futures = self
             .batch

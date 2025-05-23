@@ -3,7 +3,7 @@ use thiserror::{self, Error};
 use tokio::{sync::watch::error::SendError, task::JoinError};
 use trust_dns_resolver::error::ResolveError;
 
-use crate::net::error::NetError;
+use crate::net::net_error::NetError;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -51,9 +51,9 @@ pub trait Explain<T> {
 impl<T> Explain<T> for Result<T> {
     fn explain(self) -> T {
         match self {
-            Ok(ok) => return ok,
+            Ok(ok) => ok,
             Err(error) => {
-                eprintln!("An error occurred.\n{}", error.to_string());
+                eprintln!("An error occurred.\n{}", error);
                 exit(1);
             },
         }

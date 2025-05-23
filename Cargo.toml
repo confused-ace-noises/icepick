@@ -23,7 +23,10 @@ dashmap = "6.1.0"
 trust-dns-resolver = "*"
 tokio-stream = "0.1.17"
 async-trait = "0.1.88"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+mime = "0.3.17"
 
-[profile.test]
-opt-level = 3
-codegen-units = 1
+
+# [profile.test]
+# opt-level = 3
+# codegen-units = 1

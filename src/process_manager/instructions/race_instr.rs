@@ -1,36 +1,17 @@
-use std::sync::Arc;
+use futures::future::select_all;
+use crate::process_manager::proc_manager_handle::UserProcess;
 
-use futures::{StreamExt, channel::oneshot, future::select_all, stream::FuturesUnordered};
-use tokio::sync::mpsc::Sender;
-
-use super::super::task::{Executor, InstructionExecutor};
+use super::super::task::InstructionExecutor;
 
 // TODO: FIXME: not fair, the first of the vector almost always wins
 pub struct RaceInstruction<Input: Send + 'static>(Vec<Input>);
 
-impl<I: Send + 'static, CO> InstructionExecutor<I, CO, Option<CO>> for RaceInstruction<I> {
-    fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    fn execute<Preprocessed>(
+impl<I: Send + 'static, CO: Send + 'static, PP: Send + Clone + 'static> InstructionExecutor<I, CO, Option<CO>, PP> for RaceInstruction<I> {
+    fn execute(
         self,
-        preprocessed: Preprocessed,
-        process: Arc<
-            Box<
-                dyn Fn(
-                        Preprocessed,
-                        I,
-                    )
-                        -> std::pin::Pin<Box<dyn Future<Output = CO> + Send + 'static>>
-                    + Send
-                    + Sync
-                    + 'static,
-            >,
-        >,
+        preprocessed: PP,
+        process: UserProcess<I, CO, PP>
     ) -> impl Future<Output = Option<CO>> + Send
-    where
-        Preprocessed: Clone + Send + 'static,
     {
         // let mut unordered_futs = FuturesUnordered::new();
         // unordered_futs.extend(self.0.into_iter().map(|input| {
@@ -50,6 +31,10 @@ impl<I: Send + 'static, CO> InstructionExecutor<I, CO, Option<CO>> for RaceInstr
 }
 
 impl<I: Send + 'static> RaceInstruction<I> {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
     pub fn push(&mut self, value: I) {
         self.0.push(value);
     }

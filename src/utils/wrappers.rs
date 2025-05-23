@@ -1,4 +1,4 @@
-use std::{ops::{Deref, DerefMut}, str::FromStr};
+use std::{ops::{Deref, DerefMut}, path::Display, str::FromStr};
 use chrono::{DateTime as ChronoDatetime, Local};
 use tokio_rusqlite::ToSql;
 use url::Url;
@@ -24,15 +24,18 @@ impl<T> DerefMut for W<T> {
 pub type DateTime = W<ChronoDatetime<Local>>;
 
 impl DateTime {
+    #[must_use]
     pub fn now() -> Self {
         let now = Local::now();
         W(now)
     }
 }
 
-impl ToString for DateTime {
-    fn to_string(&self) -> String {
-        self.format("%Y-%m-%d %H:%M:%S").to_string()
+impl std::fmt::Display for DateTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let formatted = self.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        f.write_str(formatted.as_str())
     }
 }
 
