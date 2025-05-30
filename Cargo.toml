@@ -1,0 +1,17 @@
+[workspace]
+
+members = [
+    "crawler",
+    "net_client",
+
+]
+
+[workspace.dependencies]
+
+tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "time"] }
+tracing = "0.1"
+# tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+futures = "0.3.31"
+thiserror = "2.0.12"
+

@@ -1,0 +1,15 @@
+[package]
+name = "net_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+reqwest = "0.12.18"
+dashmap = "6.1.0"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+url = "2.5.4"
